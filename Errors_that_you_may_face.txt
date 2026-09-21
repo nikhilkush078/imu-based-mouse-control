@@ -1,0 +1,239 @@
+# Project Development & Testing Log
+
+## Project
+**MPU-6500 ESP8266 Tilt Mouse**
+
+This file documents the main problems faced while building and testing the project and how they were solved.
+
+---
+
+## 1. MPU-6500 Library Compatibility Problem
+
+### Problem
+Initially, the standard `Adafruit MPU6050` library was used to communicate with the IMU.
+
+The sensor was detected on I²C, but the library initialization failed because the sensor was actually an **MPU-6500**, not an MPU-6050.
+
+### Testing
+The I²C scanner detected:
+
+```text
+I²C Address: 0x68
+
+The WHO_AM_I register returned:
+
+0x70
+
+This identified the sensor as an MPU-6500.
+
+Solution
+
+Instead of using the MPU6050 library, the project was changed to directly access the MPU-6500 registers using Wire.h.
+
+2. Reading Raw Sensor Data
+Problem
+
+After identifying the sensor, the next challenge was obtaining reliable accelerometer values.
+
+Solution
+
+The MPU-6500 was manually initialized by writing to its power-management register:
+
+Register: 0x6B
+Value: 0x00
+
+Accelerometer registers were then read directly:
+
+AX → 0x3B
+AY → 0x3D
+AZ → 0x3F
+
+The values changed correctly when the sensor was moved.
+
+3. Finding the Correct Tilt Axes
+Problem
+
+It was initially unclear which physical direction of the MPU-6500 corresponded to left/right and forward/backward cursor movement.
+
+Solution
+
+Separate experiments were performed.
+
+The X-axis angle changed significantly when the sensor was tilted left/right, so:
+
+X angle → Left / Right
+
+The Y-axis angle changed significantly when the sensor was tilted forward/backward, so:
+
+Y angle → Up / Down
+4. Cursor Direction Was Reversed
+Problem
+
+During testing, the physical left/right movement was opposite to the desired cursor movement.
+
+For example, tilting the controller in one direction caused the cursor to move in the opposite direction.
+
+Solution
+
+The X-axis cursor direction was inverted in the Python program.
+
+This allowed the physical movement and cursor movement to match the intended controls.
+
+5. Sensor Noise Around Neutral Position
+Problem
+
+Even when the controller was approximately stationary, the calculated angle changed by a few degrees.
+
+This caused unwanted small cursor movements.
+
+Solution
+
+A dead zone was added:
+
+DEAD_ZONE = 5.0
+
+Angles within ±5° are treated as neutral.
+
+Small angle → No movement
+Larger angle → Cursor movement
+6. Making Tilt Control Speed
+Problem
+
+Simply converting tilt into ON/OFF movement did not provide smooth control.
+
+The desired behavior was:
+
+Small tilt  → Slow movement
+Large tilt  → Fast movement
+Solution
+
+The tilt angle was converted into a variable cursor speed.
+
+A nonlinear scaling function was used so that small tilts produce slower movement while larger tilts produce faster movement.
+
+7. Continuous Cursor Movement
+Problem
+
+The cursor needed to continue moving while the user held the controller at a tilted angle.
+
+Solution
+
+The Python program continuously reads the latest UDP data and generates mouse movement while the tilt remains outside the dead zone.
+
+Returning the controller close to the neutral position stops the cursor.
+
+8. Wi-Fi Communication
+Problem
+
+The ESP8266 had to communicate wirelessly with the Ubuntu laptop.
+
+Solution
+
+UDP communication was selected because the project only needs fast sensor data transmission.
+
+The communication structure is:
+
+ESP8266
+   ↓
+Wi-Fi
+   ↓
+UDP
+   ↓
+Ubuntu Laptop
+
+UDP port:
+
+4210
+
+A UDP communication test was performed successfully before integrating the mouse control.
+
+9. Python Mouse Control Problem on Linux
+Problem
+
+The first approach using Python mouse-control libraries did not work correctly because of Linux/X11 authorization restrictions.
+
+Solution
+
+The project was changed to use Linux's virtual input system through:
+
+evdev
+uinput
+
+Python creates a virtual mouse device and sends mouse events directly to the Linux input system.
+
+10. /dev/uinput Permission Problem
+Problem
+
+The Python program could not access the Linux uinput device as a normal user.
+
+Solution
+
+The uinput kernel module was loaded:
+
+sudo modprobe uinput
+
+The Python program was then run with administrator privileges:
+
+sudo /usr/bin/python3 main.py
+11. Python Indentation / Syntax Problem
+Problem
+
+During development, an incorrect indentation around:
+
+time.sleep(UPDATE_TIME)
+
+caused a Python syntax/indentation error.
+
+Solution
+
+The Python code was cleaned up and checked using:
+
+/usr/bin/python3 -m py_compile main.py
+
+This allowed syntax errors to be detected before running the complete program.
+
+12. Button Integration
+Problem
+
+The project originally focused only on tilt-based cursor movement. Physical mouse actions also needed to be added.
+
+Solution
+
+Two push buttons were connected using INPUT_PULLUP.
+
+Current configuration:
+
+Button 1 → Mouse Left Click
+Button 2 → Reserved
+
+Button 1 is detected by the ESP8266 and transmitted together with the accelerometer data.
+
+Final Testing
+
+After solving the above problems, the complete system was tested as:
+
+MPU-6500
+    ↓
+ESP8266
+    ↓
+Wi-Fi
+    ↓
+UDP
+    ↓
+Python
+    ↓
+evdev / uinput
+    ↓
+Virtual Mouse
+    ↓
+Cursor
+
+The final system successfully supports:
+
+Left/right cursor movement using X-axis tilt
+Up/down cursor movement using Y-axis tilt
+Variable cursor speed based on tilt angle
+Continuous movement while tilted
+Neutral-position stopping
+Button 1 left click
+Wireless communication between ESP8266 and Ubuntu
